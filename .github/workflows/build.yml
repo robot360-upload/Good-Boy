@@ -1,38 +1,24 @@
-name: Build OrangeFox - Galaxy Tab A7
+name: Inspect OrangeFox - Galaxy Tab A7
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
-  build:
+  inspect:
     runs-on: ubuntu-24.04
 
     steps:
-
-      # ============================================================
-      # Free disk space
-      # ============================================================
       - name: Free disk space
         run: |
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
-          sudo docker system prune -af || true
-
-          echo "=== Disk space ==="
+          sudo rm -rf /usr/local/share/powershell
           df -h
 
-
-      # ============================================================
-      # Install dependencies
-      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             adb \
             bc \
@@ -45,30 +31,18 @@ jobs:
             gcc-multilib \
             git \
             gnupg \
-            gperf \
-            imagemagick \
             lib32z1-dev \
-            libelf-dev \
-            liblz4-tool \
             libncurses-dev \
             libreadline-dev \
-            libsdl1.2-dev \
-            libssl-dev \
-            libxml2 \
+            lz4 \
             lzop \
-            pngcrush \
+            openjdk-11-jdk \
+            python3 \
             rsync \
-            schedtool \
-            squashfs-tools \
             unzip \
-            xsltproc \
             zip \
-            zlib1g-dev
+            zstd
 
-
-      # ============================================================
-      # Install Android repo tool
-      # ============================================================
       - name: Install repo
         run: |
           mkdir -p "$HOME/bin"
@@ -78,357 +52,266 @@ jobs:
             -o "$HOME/bin/repo"
 
           chmod a+x "$HOME/bin/repo"
-
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-          echo "=== repo version ==="
           "$HOME/bin/repo" --version
 
-
-      # ============================================================
-      # Configure Git
-      # ============================================================
-      - name: Configure git
+      - name: Configure Git
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git config --global color.ui false
 
-
-      # ============================================================
-      # Configure OrangeFox
-      # ============================================================
-      - name: Configure OrangeFox
+      - name: Set OrangeFox environment
         run: |
           echo "FOX_BUILD_DEVICE=gta4l" >> "$GITHUB_ENV"
           echo "FOX_VANILLA_BUILD=1" >> "$GITHUB_ENV"
 
-          echo "FOX_BUILD_DEVICE=gta4l"
-          echo "FOX_VANILLA_BUILD=1"
-
-
-      # ============================================================
-      # Sync OrangeFox source
-      # ============================================================
-      - name: Sync OrangeFox
+      - name: Sync OrangeFox source
         run: |
           mkdir -p "$GITHUB_WORKSPACE/fox"
-
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "========================================"
-          echo "Cloning OrangeFox sync repository"
-          echo "========================================"
+          repo init \
+            --depth=1 \
+            -u https://gitlab.com/OrangeFox/Manifest.git \
+            -b fox_12.1
 
-          git clone \
-            https://gitlab.com/OrangeFox/sync.git \
-            orangefox-sync
+          repo sync \
+            -c \
+            --no-clone-bundle \
+            --no-tags \
+            --optimized-fetch \
+            --prune \
+            --force-sync \
+            -j2
 
-          cd orangefox-sync
-
-          echo "========================================"
-          echo "Starting OrangeFox sync"
-          echo "========================================"
-
-          ./orangefox_sync.sh \
-            --branch 12.1 \
-            --path "$GITHUB_WORKSPACE/fox"
-
-
-      # ============================================================
-      # Clone gta4l device tree
-      # ============================================================
-      - name: Clone device tree
+      - name: Clone Android 16 device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "========================================"
-          echo "Cloning gta4l device tree"
-          echo "========================================"
+          rm -rf device/samsung/gta4l
 
           git clone \
-            -b lineage-23.2 \
+            --depth=1 \
+            --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l.git \
             device/samsung/gta4l
 
-
-      # ============================================================
-      # Clone gta4l common device tree
-      # ============================================================
-      - name: Clone common device tree
+      - name: Clone Android 16 common tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "========================================"
-          echo "Cloning gta4l-common device tree"
-          echo "========================================"
+          rm -rf device/samsung/gta4l-common
 
           git clone \
-            -b lineage-23.2 \
+            --depth=1 \
+            --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l-common.git \
             device/samsung/gta4l-common
 
+      - name: Clone SM6115 kernel
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
 
-      # ============================================================
-      # Inspect device trees
-      # ============================================================
-      - name: Inspect device trees
+          rm -rf kernel/samsung/sm6115
+
+          git clone \
+            --depth=1 \
+            https://github.com/chrmhoffmann/android_kernel_samsung_sm6115.git \
+            kernel/samsung/sm6115
+
+      - name: Inspect Android 16 device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "GTA4L DEVICE TREE"
+          echo "DEVICE TREE FILES"
           echo "========================================"
 
           find device/samsung/gta4l \
-            -maxdepth 2 \
+            -maxdepth 3 \
             -type f \
-            -print | sort
+            | sort
 
           echo
           echo "========================================"
-          echo "GTA4L COMMON DEVICE TREE"
+          echo "COMMON TREE FILES"
           echo "========================================"
 
           find device/samsung/gta4l-common \
-            -maxdepth 2 \
+            -maxdepth 3 \
             -type f \
-            -print | sort
+            | sort
 
           echo
+          echo "========================================"
+          echo "RECOVERY / FSTAB FILES"
+          echo "========================================"
+
+          find device/samsung/gta4l \
+               device/samsung/gta4l-common \
+            -type f \
+            \( \
+              -iname '*fstab*' \
+              -o -iname '*recovery*' \
+              -o -iname '*init*.rc' \
+              -o -iname '*ramdisk*' \
+            \) \
+            -print \
+            | sort
+
+      - name: Inspect BoardConfig
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "BoardConfig.mk"
+          echo "========================================"
+
+          cat device/samsung/gta4l/BoardConfig.mk
+
+          echo
+          echo "========================================"
+          echo "BoardConfigCommon.mk"
+          echo "========================================"
+
+          cat device/samsung/gta4l-common/BoardConfigCommon.mk
+
+      - name: Inspect product definitions
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
           echo "========================================"
           echo "AndroidProducts.mk"
           echo "========================================"
 
-          if [ -f device/samsung/gta4l/AndroidProducts.mk ]; then
-            cat device/samsung/gta4l/AndroidProducts.mk
-          else
-            echo "WARNING: AndroidProducts.mk not found"
-          fi
+          cat device/samsung/gta4l/AndroidProducts.mk
 
           echo
           echo "========================================"
-          echo "Product makefiles"
+          echo "lineage_gta4l.mk"
           echo "========================================"
 
-          find device/samsung/gta4l \
-            -type f \
-            \( \
-              -name "AndroidProducts.mk" \
-              -o -name "*Products.mk" \
-              -o -name "*twrp*.mk" \
-              -o -name "*omni*.mk" \
-              -o -name "*fox*.mk" \
-            \) \
-            -print
+          cat device/samsung/gta4l/lineage_gta4l.mk
 
           echo
           echo "========================================"
-          echo "References to gta4l"
+          echo "device.mk"
           echo "========================================"
 
-          grep -R \
-            "twrp_gta4l\|omni_gta4l\|fox_gta4l\|gta4l" \
+          cat device/samsung/gta4l/device.mk
+
+      - name: Inspect fstab candidates
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "FSTAB CONTENT"
+          echo "========================================"
+
+          while IFS= read -r file; do
+            echo
+            echo "----------------------------------------"
+            echo "$file"
+            echo "----------------------------------------"
+            cat "$file"
+          done < <(
+            find device/samsung/gta4l \
+                 device/samsung/gta4l-common \
+              -type f \
+              \( -iname '*fstab*' \) \
+              -print \
+              | sort
+          )
+
+      - name: Inspect recovery references
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "RECOVERY REFERENCES"
+          echo "========================================"
+
+          grep -RniE \
+            'TARGET_RECOVERY|RECOVERY_FSTAB|TW_|OF_|BOARD_RECOVERY|RECOVERYIMAGE|recoveryimage' \
             device/samsung/gta4l \
             device/samsung/gta4l-common \
-            2>/dev/null || true
+            2>/dev/null \
+            | head -n 500 || true
 
-
-      # ============================================================
-      # Check OrangeFox build system
-      # ============================================================
-      - name: Check OrangeFox build system
+      - name: Inspect kernel configuration
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "SOURCE TREE"
+          echo "KERNEL TREE"
           echo "========================================"
 
-          pwd
-          ls -la
+          ls -la kernel/samsung/sm6115
 
           echo
           echo "========================================"
-          echo "build directory"
+          echo "DEFCONFIG REFERENCES"
           echo "========================================"
 
-          ls -la build/ || true
-
-          echo
-          echo "========================================"
-          echo "envsetup.sh"
-          echo "========================================"
-
-          if [ -f build/envsetup.sh ]; then
-            echo "build/envsetup.sh exists"
-            ls -lh build/envsetup.sh
-          else
-            echo "ERROR: build/envsetup.sh does not exist"
-            exit 1
-          fi
-
-
-      # ============================================================
-      # Initialize Android build environment
-      #
-      # IMPORTANT:
-      # We deliberately disable 'set -e' while sourcing envsetup.sh
-      # so the actual failure is visible in the Actions log.
-      # ============================================================
-      - name: Initialize build environment
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "Environment"
-          echo "========================================"
-
-          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
-          echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
-
-          echo
-          echo "========================================"
-          echo "Sourcing build/envsetup.sh"
-          echo "========================================"
-
-          set +e
-          set -x
-
-          source build/envsetup.sh
-
-          ENVSETUP_EXIT=$?
-
-          set +x
-
-          echo
-          echo "========================================"
-          echo "envsetup.sh exit code"
-          echo "========================================"
-
-          echo "$ENVSETUP_EXIT"
-
-          echo
-          echo "========================================"
-          echo "PATH"
-          echo "========================================"
-
-          echo "$PATH"
-
-          echo
-          echo "========================================"
-          echo "Lunch command"
-          echo "========================================"
-
-          type lunch 2>&1 || true
-
-          echo
-          echo "========================================"
-          echo "Available lunch targets"
-          echo "========================================"
-
-          lunch 2>&1 || true
-
-          echo
-          echo "========================================"
-          echo "Environment variables"
-          echo "========================================"
-
-          env | sort | grep -E \
-            'FOX_|ANDROID_|OUT_DIR|TARGET_|BUILD_' \
+          grep -RniE \
+            'defconfig|gta4l-common.config|TARGET_KERNEL' \
+            device/samsung/gta4l \
+            device/samsung/gta4l-common \
+            2>/dev/null \
             || true
 
-          # Return the original envsetup exit code.
-          exit "$ENVSETUP_EXIT"
-
-
-      # ============================================================
-      # Select build target
-      # ============================================================
-      - name: Select build target
+      - name: Inspect OrangeFox environment
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "Selecting build target"
+          echo "ORANGEFOX SOURCE"
           echo "========================================"
 
-          source build/envsetup.sh
+          git -C . status --short || true
 
-          lunch twrp_gta4l-eng
-
-
-      # ============================================================
-      # Build OrangeFox
-      # ============================================================
-      - name: Build OrangeFox
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "Starting OrangeFox build"
-          echo "========================================"
-
+          echo
           echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
           echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
 
-          source build/envsetup.sh
-
-          lunch twrp_gta4l-eng
-
-          mka recoveryimage 2>&1 | tee build.log
-
-
-      # ============================================================
-      # Find output
-      # ============================================================
-      - name: Find output
-        if: always()
+      - name: Check build environment
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "========================================"
-          echo "BUILD OUTPUT"
-          echo "========================================"
+          set +e
 
-          if [ -d out/target/product/gta4l ]; then
-
-            find out/target/product/gta4l \
-              -maxdepth 1 \
-              -type f \
-              -printf '%f\n' \
-              | sort
-
-          else
-
-            echo "out/target/product/gta4l does not exist"
-
-          fi
+          source build/envsetup.sh
 
           echo
           echo "========================================"
-          echo "Recovery images"
+          echo "AVAILABLE GTA4L LUNCH TARGETS"
           echo "========================================"
 
-          find out/target/product/gta4l \
-            -type f \
-            \( \
-              -iname "*recovery*" \
-              -o -iname "*orangefox*" \
-            \) \
-            -print 2>/dev/null || true
+          lunch 2>&1 | grep -i gta4l || true
 
+          echo
+          echo "========================================"
+          echo "ALL LUNCH TARGETS CONTAINING TWRP/FOX"
+          echo "========================================"
 
-      # ============================================================
-      # Upload artifacts
-      # ============================================================
-      - name: Upload OrangeFox artifacts
+          lunch 2>&1 | grep -Ei 'twrp|orangefox|fox' || true
+
+          echo
+          echo "========================================"
+          echo "ENVIRONMENT STATUS"
+          echo "========================================"
+
+          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
+          echo "OUT_DIR=$OUT_DIR"
+          echo "FOX_MANIFEST_ROOT=$FOX_MANIFEST_ROOT"
+
+      - name: Upload inspection output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox-gta4l
+          name: gta4l-android16-orangefox-inspection
           path: |
-            fox/out/target/product/gta4l/OrangeFox-unofficial-gta4l.img
-            fox/out/target/product/gta4l/recovery.img
-            fox/build.log
+            fox/device/samsung/gta4l/
+            fox/device/samsung/gta4l-common/
           if-no-files-found: warn
