@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+
       # ============================================================
       # Free disk space
       # ============================================================
@@ -24,8 +25,9 @@ jobs:
           echo "=== Disk space ==="
           df -h
 
+
       # ============================================================
-      # Install build dependencies
+      # Install dependencies
       # ============================================================
       - name: Install dependencies
         run: |
@@ -63,6 +65,7 @@ jobs:
             zip \
             zlib1g-dev
 
+
       # ============================================================
       # Install Android repo tool
       # ============================================================
@@ -81,6 +84,7 @@ jobs:
           echo "=== repo version ==="
           "$HOME/bin/repo" --version
 
+
       # ============================================================
       # Configure Git
       # ============================================================
@@ -88,11 +92,11 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-
           git config --global color.ui false
 
+
       # ============================================================
-      # Configure OrangeFox environment
+      # Configure OrangeFox
       # ============================================================
       - name: Configure OrangeFox
         run: |
@@ -101,6 +105,7 @@ jobs:
 
           echo "FOX_BUILD_DEVICE=gta4l"
           echo "FOX_VANILLA_BUILD=1"
+
 
       # ============================================================
       # Sync OrangeFox source
@@ -111,7 +116,9 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "=== Cloning OrangeFox sync repository ==="
+          echo "========================================"
+          echo "Cloning OrangeFox sync repository"
+          echo "========================================"
 
           git clone \
             https://gitlab.com/OrangeFox/sync.git \
@@ -119,52 +126,58 @@ jobs:
 
           cd orangefox-sync
 
-          echo "=== OrangeFox sync script ==="
-          ./orangefox_sync.sh --version || true
-
-          echo "=== Starting OrangeFox sync ==="
+          echo "========================================"
+          echo "Starting OrangeFox sync"
+          echo "========================================"
 
           ./orangefox_sync.sh \
             --branch 12.1 \
             --path "$GITHUB_WORKSPACE/fox"
 
+
       # ============================================================
-      # Clone device tree
+      # Clone gta4l device tree
       # ============================================================
       - name: Clone device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "=== Cloning gta4l device tree ==="
+          echo "========================================"
+          echo "Cloning gta4l device tree"
+          echo "========================================"
 
           git clone \
             -b lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l.git \
             device/samsung/gta4l
 
+
       # ============================================================
-      # Clone common device tree
+      # Clone gta4l common device tree
       # ============================================================
       - name: Clone common device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          echo "=== Cloning gta4l-common device tree ==="
+          echo "========================================"
+          echo "Cloning gta4l-common device tree"
+          echo "========================================"
 
           git clone \
             -b lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l-common.git \
             device/samsung/gta4l-common
 
+
       # ============================================================
-      # Inspect device tree
+      # Inspect device trees
       # ============================================================
-      - name: Inspect device tree
+      - name: Inspect device trees
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "DEVICE TREE"
+          echo "GTA4L DEVICE TREE"
           echo "========================================"
 
           find device/samsung/gta4l \
@@ -174,7 +187,7 @@ jobs:
 
           echo
           echo "========================================"
-          echo "COMMON DEVICE TREE"
+          echo "GTA4L COMMON DEVICE TREE"
           echo "========================================"
 
           find device/samsung/gta4l-common \
@@ -220,6 +233,7 @@ jobs:
             device/samsung/gta4l-common \
             2>/dev/null || true
 
+
       # ============================================================
       # Check OrangeFox build system
       # ============================================================
@@ -228,32 +242,39 @@ jobs:
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "BUILD DIRECTORY"
+          echo "SOURCE TREE"
           echo "========================================"
 
           pwd
-
-          echo
-          echo "========================================"
-          echo "Top-level source directories"
-          echo "========================================"
-
           ls -la
 
           echo
           echo "========================================"
-          echo "build/envsetup.sh"
+          echo "build directory"
+          echo "========================================"
+
+          ls -la build/ || true
+
+          echo
+          echo "========================================"
+          echo "envsetup.sh"
           echo "========================================"
 
           if [ -f build/envsetup.sh ]; then
             echo "build/envsetup.sh exists"
+            ls -lh build/envsetup.sh
           else
             echo "ERROR: build/envsetup.sh does not exist"
             exit 1
           fi
 
+
       # ============================================================
       # Initialize Android build environment
+      #
+      # IMPORTANT:
+      # We deliberately disable 'set -e' while sourcing envsetup.sh
+      # so the actual failure is visible in the Actions log.
       # ============================================================
       - name: Initialize build environment
         run: |
@@ -271,24 +292,55 @@ jobs:
           echo "Sourcing build/envsetup.sh"
           echo "========================================"
 
+          set +e
+          set -x
+
           source build/envsetup.sh
 
+          ENVSETUP_EXIT=$?
+
+          set +x
+
           echo
-          echo "envsetup completed successfully"
+          echo "========================================"
+          echo "envsetup.sh exit code"
+          echo "========================================"
+
+          echo "$ENVSETUP_EXIT"
+
+          echo
+          echo "========================================"
+          echo "PATH"
+          echo "========================================"
+
+          echo "$PATH"
 
           echo
           echo "========================================"
           echo "Lunch command"
           echo "========================================"
 
-          type lunch || true
+          type lunch 2>&1 || true
 
           echo
           echo "========================================"
-          echo "Available products"
+          echo "Available lunch targets"
           echo "========================================"
 
           lunch 2>&1 || true
+
+          echo
+          echo "========================================"
+          echo "Environment variables"
+          echo "========================================"
+
+          env | sort | grep -E \
+            'FOX_|ANDROID_|OUT_DIR|TARGET_|BUILD_' \
+            || true
+
+          # Return the original envsetup exit code.
+          exit "$ENVSETUP_EXIT"
+
 
       # ============================================================
       # Select build target
@@ -297,36 +349,38 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          source build/envsetup.sh
+          echo "========================================"
+          echo "Selecting build target"
+          echo "========================================"
 
-          echo "========================================"
-          echo "Selecting twrp_gta4l-eng"
-          echo "========================================"
+          source build/envsetup.sh
 
           lunch twrp_gta4l-eng
 
+
       # ============================================================
-      # Build OrangeFox recovery
+      # Build OrangeFox
       # ============================================================
       - name: Build OrangeFox
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          source build/envsetup.sh
-
-          lunch twrp_gta4l-eng
-
           echo "========================================"
-          echo "Starting OrangeFox recovery build"
+          echo "Starting OrangeFox build"
           echo "========================================"
 
           echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
           echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
 
+          source build/envsetup.sh
+
+          lunch twrp_gta4l-eng
+
           mka recoveryimage 2>&1 | tee build.log
 
+
       # ============================================================
-      # Show build output
+      # Find output
       # ============================================================
       - name: Find output
         if: always()
@@ -338,30 +392,35 @@ jobs:
           echo "========================================"
 
           if [ -d out/target/product/gta4l ]; then
+
             find out/target/product/gta4l \
               -maxdepth 1 \
               -type f \
               -printf '%f\n' \
               | sort
+
           else
+
             echo "out/target/product/gta4l does not exist"
+
           fi
 
           echo
           echo "========================================"
-          echo "Recovery files"
+          echo "Recovery images"
           echo "========================================"
 
           find out/target/product/gta4l \
             -type f \
             \( \
-              -name "*recovery*" \
-              -o -name "*OrangeFox*" \
+              -iname "*recovery*" \
+              -o -iname "*orangefox*" \
             \) \
             -print 2>/dev/null || true
 
+
       # ============================================================
-      # Upload build artifacts
+      # Upload artifacts
       # ============================================================
       - name: Upload OrangeFox artifacts
         if: always()
