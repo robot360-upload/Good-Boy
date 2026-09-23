@@ -55,10 +55,29 @@ jobs:
             zip \
             zlib1g-dev
 
+      - name: Install repo
+        run: |
+          mkdir -p "$HOME/bin"
+
+          curl -fsSL \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+
+          chmod a+x "$HOME/bin/repo"
+
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+          "$HOME/bin/repo" --version
+
       - name: Configure git
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
+
+      - name: Configure OrangeFox
+        run: |
+          echo "FOX_BUILD_DEVICE=gta4l" >> "$GITHUB_ENV"
+          echo "FOX_VANILLA_BUILD=1" >> "$GITHUB_ENV"
 
       - name: Sync OrangeFox
         run: |
@@ -66,7 +85,9 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/fox"
 
-          git clone https://gitlab.com/OrangeFox/sync.git orangefox-sync
+          git clone \
+            https://gitlab.com/OrangeFox/sync.git \
+            orangefox-sync
 
           cd orangefox-sync
 
@@ -96,28 +117,22 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
+          echo "========================================"
           echo "Device tree:"
+          echo "========================================"
           ls -la device/samsung/gta4l
 
+          echo "========================================"
           echo "Common tree:"
+          echo "========================================"
           ls -la device/samsung/gta4l-common
-
-      - name: Configure OrangeFox
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          export FOX_BUILD_DEVICE=gta4l
-          export FOX_VANILLA_BUILD=1
-
-          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
-          echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
 
       - name: Build OrangeFox
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
-          export FOX_BUILD_DEVICE=gta4l
-          export FOX_VANILLA_BUILD=1
+          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
+          echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
 
           source build/envsetup.sh
 
@@ -126,8 +141,13 @@ jobs:
           mka recoveryimage 2>&1 | tee build.log
 
       - name: Find output
+        if: always()
         run: |
           cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "Build output:"
+          echo "========================================"
 
           find out/target/product/gta4l \
             -maxdepth 1 \
@@ -136,6 +156,7 @@ jobs:
             2>/dev/null || true
 
       - name: Upload OrangeFox image
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox-gta4l
