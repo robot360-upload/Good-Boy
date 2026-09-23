@@ -11,14 +11,22 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # ============================================================
+      # Free disk space
+      # ============================================================
       - name: Free disk space
         run: |
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo docker system prune -af || true
+
+          echo "=== Disk space ==="
           df -h
 
+      # ============================================================
+      # Install build dependencies
+      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -55,6 +63,9 @@ jobs:
             zip \
             zlib1g-dev
 
+      # ============================================================
+      # Install Android repo tool
+      # ============================================================
       - name: Install repo
         run: |
           mkdir -p "$HOME/bin"
@@ -67,23 +78,40 @@ jobs:
 
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
+          echo "=== repo version ==="
           "$HOME/bin/repo" --version
 
+      # ============================================================
+      # Configure Git
+      # ============================================================
       - name: Configure git
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
+          git config --global color.ui false
+
+      # ============================================================
+      # Configure OrangeFox environment
+      # ============================================================
       - name: Configure OrangeFox
         run: |
           echo "FOX_BUILD_DEVICE=gta4l" >> "$GITHUB_ENV"
           echo "FOX_VANILLA_BUILD=1" >> "$GITHUB_ENV"
 
+          echo "FOX_BUILD_DEVICE=gta4l"
+          echo "FOX_VANILLA_BUILD=1"
+
+      # ============================================================
+      # Sync OrangeFox source
+      # ============================================================
       - name: Sync OrangeFox
         run: |
           mkdir -p "$GITHUB_WORKSPACE/fox"
 
           cd "$GITHUB_WORKSPACE/fox"
+
+          echo "=== Cloning OrangeFox sync repository ==="
 
           git clone \
             https://gitlab.com/OrangeFox/sync.git \
@@ -91,71 +119,251 @@ jobs:
 
           cd orangefox-sync
 
+          echo "=== OrangeFox sync script ==="
+          ./orangefox_sync.sh --version || true
+
+          echo "=== Starting OrangeFox sync ==="
+
           ./orangefox_sync.sh \
             --branch 12.1 \
             --path "$GITHUB_WORKSPACE/fox"
 
+      # ============================================================
+      # Clone device tree
+      # ============================================================
       - name: Clone device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
+
+          echo "=== Cloning gta4l device tree ==="
 
           git clone \
             -b lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l.git \
             device/samsung/gta4l
 
+      # ============================================================
+      # Clone common device tree
+      # ============================================================
       - name: Clone common device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
+
+          echo "=== Cloning gta4l-common device tree ==="
 
           git clone \
             -b lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l-common.git \
             device/samsung/gta4l-common
 
-      - name: Show source tree
+      # ============================================================
+      # Inspect device tree
+      # ============================================================
+      - name: Inspect device tree
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "Device tree:"
+          echo "DEVICE TREE"
           echo "========================================"
-          ls -la device/samsung/gta4l
 
-          echo "========================================"
-          echo "Common tree:"
-          echo "========================================"
-          ls -la device/samsung/gta4l-common
+          find device/samsung/gta4l \
+            -maxdepth 2 \
+            -type f \
+            -print | sort
 
-      - name: Build OrangeFox
+          echo
+          echo "========================================"
+          echo "COMMON DEVICE TREE"
+          echo "========================================"
+
+          find device/samsung/gta4l-common \
+            -maxdepth 2 \
+            -type f \
+            -print | sort
+
+          echo
+          echo "========================================"
+          echo "AndroidProducts.mk"
+          echo "========================================"
+
+          if [ -f device/samsung/gta4l/AndroidProducts.mk ]; then
+            cat device/samsung/gta4l/AndroidProducts.mk
+          else
+            echo "WARNING: AndroidProducts.mk not found"
+          fi
+
+          echo
+          echo "========================================"
+          echo "Product makefiles"
+          echo "========================================"
+
+          find device/samsung/gta4l \
+            -type f \
+            \( \
+              -name "AndroidProducts.mk" \
+              -o -name "*Products.mk" \
+              -o -name "*twrp*.mk" \
+              -o -name "*omni*.mk" \
+              -o -name "*fox*.mk" \
+            \) \
+            -print
+
+          echo
+          echo "========================================"
+          echo "References to gta4l"
+          echo "========================================"
+
+          grep -R \
+            "twrp_gta4l\|omni_gta4l\|fox_gta4l\|gta4l" \
+            device/samsung/gta4l \
+            device/samsung/gta4l-common \
+            2>/dev/null || true
+
+      # ============================================================
+      # Check OrangeFox build system
+      # ============================================================
+      - name: Check OrangeFox build system
         run: |
           cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "BUILD DIRECTORY"
+          echo "========================================"
+
+          pwd
+
+          echo
+          echo "========================================"
+          echo "Top-level source directories"
+          echo "========================================"
+
+          ls -la
+
+          echo
+          echo "========================================"
+          echo "build/envsetup.sh"
+          echo "========================================"
+
+          if [ -f build/envsetup.sh ]; then
+            echo "build/envsetup.sh exists"
+          else
+            echo "ERROR: build/envsetup.sh does not exist"
+            exit 1
+          fi
+
+      # ============================================================
+      # Initialize Android build environment
+      # ============================================================
+      - name: Initialize build environment
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
+          echo "========================================"
+          echo "Environment"
+          echo "========================================"
 
           echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
           echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
+
+          echo
+          echo "========================================"
+          echo "Sourcing build/envsetup.sh"
+          echo "========================================"
+
+          source build/envsetup.sh
+
+          echo
+          echo "envsetup completed successfully"
+
+          echo
+          echo "========================================"
+          echo "Lunch command"
+          echo "========================================"
+
+          type lunch || true
+
+          echo
+          echo "========================================"
+          echo "Available products"
+          echo "========================================"
+
+          lunch 2>&1 || true
+
+      # ============================================================
+      # Select build target
+      # ============================================================
+      - name: Select build target
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
+
+          source build/envsetup.sh
+
+          echo "========================================"
+          echo "Selecting twrp_gta4l-eng"
+          echo "========================================"
+
+          lunch twrp_gta4l-eng
+
+      # ============================================================
+      # Build OrangeFox recovery
+      # ============================================================
+      - name: Build OrangeFox
+        run: |
+          cd "$GITHUB_WORKSPACE/fox"
 
           source build/envsetup.sh
 
           lunch twrp_gta4l-eng
 
+          echo "========================================"
+          echo "Starting OrangeFox recovery build"
+          echo "========================================"
+
+          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
+          echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
+
           mka recoveryimage 2>&1 | tee build.log
 
+      # ============================================================
+      # Show build output
+      # ============================================================
       - name: Find output
         if: always()
         run: |
           cd "$GITHUB_WORKSPACE/fox"
 
           echo "========================================"
-          echo "Build output:"
+          echo "BUILD OUTPUT"
+          echo "========================================"
+
+          if [ -d out/target/product/gta4l ]; then
+            find out/target/product/gta4l \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' \
+              | sort
+          else
+            echo "out/target/product/gta4l does not exist"
+          fi
+
+          echo
+          echo "========================================"
+          echo "Recovery files"
           echo "========================================"
 
           find out/target/product/gta4l \
-            -maxdepth 1 \
             -type f \
-            -printf '%f\n' \
-            2>/dev/null || true
+            \( \
+              -name "*recovery*" \
+              -o -name "*OrangeFox*" \
+            \) \
+            -print 2>/dev/null || true
 
-      - name: Upload OrangeFox image
+      # ============================================================
+      # Upload build artifacts
+      # ============================================================
+      - name: Upload OrangeFox artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
