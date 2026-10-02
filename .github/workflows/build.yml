@@ -1,26 +1,48 @@
-name: Inspect OrangeFox - Galaxy Tab A7
+name: Build OrangeFox R12 - Galaxy Tab A7 GTA4L
 
 on:
   workflow_dispatch:
 
 jobs:
-  inspect:
+  build:
     runs-on: ubuntu-24.04
 
+    env:
+      FOX_BUILD_DEVICE: gta4l
+      FOX_VANILLA_BUILD: 1
+      OF_FORCE_PREBUILT_KERNEL: 1
+
+      # GTA4L is A-only, not A/B.
+      FOX_AB_DEVICE: 0
+
+      # Use the exact kernel that is already known to boot on the tablet.
+      TARGET_PREBUILT_KERNEL: ${{ github.workspace }}/prebuilts/kernel/gta4l/Image.gz-dtb
+
     steps:
+
+      - name: Checkout Build-Kernel repository
+        uses: actions/checkout@v4
+
       - name: Free disk space
         run: |
+          set -eux
+
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/chromium
+          sudo apt-get clean
+
           df -h
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
+          set -eux
+
           sudo apt-get update
+
           sudo apt-get install -y \
-            adb \
             bc \
             bison \
             build-essential \
@@ -31,287 +53,213 @@ jobs:
             gcc-multilib \
             git \
             gnupg \
+            lib32ncurses-dev \
+            lib32readline-dev \
             lib32z1-dev \
+            libelf-dev \
+            liblz4-tool \
+            libncurses5-dev \
             libncurses-dev \
-            libreadline-dev \
+            libssl-dev \
             lz4 \
-            lzop \
             openjdk-11-jdk \
             python3 \
             rsync \
             unzip \
-            zip \
-            zstd
+            wget \
+            xz-utils \
+            zip
 
       - name: Install repo
         run: |
+          set -eux
+
           mkdir -p "$HOME/bin"
 
-          curl -fsSL \
+          curl -L \
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o "$HOME/bin/repo"
 
           chmod a+x "$HOME/bin/repo"
+
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-          "$HOME/bin/repo" --version
+          repo --version
 
-      - name: Configure Git
+      - name: Prepare OrangeFox source tree
         run: |
+          set -eux
+
+          mkdir -p "$GITHUB_WORKSPACE/orangefox"
+          cd "$GITHUB_WORKSPACE/orangefox"
+
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Set OrangeFox environment
-        run: |
-          echo "FOX_BUILD_DEVICE=gta4l" >> "$GITHUB_ENV"
-          echo "FOX_VANILLA_BUILD=1" >> "$GITHUB_ENV"
-
-      - name: Sync OrangeFox source
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/fox"
-          cd "$GITHUB_WORKSPACE/fox"
-
-          repo init \
+          # OrangeFox R12 source branch
+          git clone \
             --depth=1 \
-            -u https://gitlab.com/OrangeFox/Manifest.git \
-            -b fox_12.1
+            --branch fox_12.1 \
+            https://gitlab.com/OrangeFox/sync.git \
+            orangefox-sync
 
-          repo sync \
-            -c \
-            --no-clone-bundle \
-            --no-tags \
-            --optimized-fetch \
-            --prune \
-            --force-sync \
-            -j2
+          cd orangefox-sync
 
-      - name: Clone Android 16 device tree
+          chmod +x orangefox_sync.sh
+
+          ./orangefox_sync.sh --branch fox_12.1
+
+      - name: Add GTA4L device trees
         run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          set -eux
 
-          rm -rf device/samsung/gta4l
+          cd "$GITHUB_WORKSPACE/orangefox"
 
+          mkdir -p device/samsung
+
+          # Device-specific tree
           git clone \
             --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l.git \
             device/samsung/gta4l
 
-      - name: Clone Android 16 common tree
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          rm -rf device/samsung/gta4l-common
-
+          # Common GTA4L tree
           git clone \
             --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l-common.git \
             device/samsung/gta4l-common
 
-      - name: Clone SM6115 kernel
+      - name: Install exact prebuilt kernel
         run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          set -eux
 
-          rm -rf kernel/samsung/sm6115
+          cd "$GITHUB_WORKSPACE/orangefox"
 
-          git clone \
-            --depth=1 \
-            https://github.com/chrmhoffmann/android_kernel_samsung_sm6115.git \
-            kernel/samsung/sm6115
+          mkdir -p prebuilts/kernel/gta4l
 
-      - name: Inspect Android 16 device tree
+          cp \
+            "$GITHUB_WORKSPACE/prebuilts/kernel/gta4l/Image.gz-dtb" \
+            prebuilts/kernel/gta4l/Image.gz-dtb
+
+          test -f prebuilts/kernel/gta4l/Image.gz-dtb
+
+          echo "Prebuilt kernel:"
+          ls -lh prebuilts/kernel/gta4l/Image.gz-dtb
+
+          echo "SHA256:"
+          sha256sum prebuilts/kernel/gta4l/Image.gz-dtb
+
+      - name: Verify GTA4L configuration
         run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          set -eux
 
-          echo "========================================"
-          echo "DEVICE TREE FILES"
-          echo "========================================"
+          cd "$GITHUB_WORKSPACE/orangefox"
 
-          find device/samsung/gta4l \
-            -maxdepth 3 \
-            -type f \
-            | sort
+          echo "=== Device BoardConfig ==="
+          sed -n '1,220p' device/samsung/gta4l/BoardConfig.mk
 
           echo
-          echo "========================================"
-          echo "COMMON TREE FILES"
-          echo "========================================"
-
-          find device/samsung/gta4l-common \
-            -maxdepth 3 \
-            -type f \
-            | sort
+          echo "=== Common BoardConfig ==="
+          sed -n '1,280p' device/samsung/gta4l-common/BoardConfigCommon.mk
 
           echo
-          echo "========================================"
-          echo "RECOVERY / FSTAB FILES"
-          echo "========================================"
+          echo "=== Prebuilt kernel ==="
+          file prebuilts/kernel/gta4l/Image.gz-dtb
 
-          find device/samsung/gta4l \
-               device/samsung/gta4l-common \
-            -type f \
-            \( \
-              -iname '*fstab*' \
-              -o -iname '*recovery*' \
-              -o -iname '*init*.rc' \
-              -o -iname '*ramdisk*' \
-            \) \
-            -print \
-            | sort
-
-      - name: Inspect BoardConfig
+      - name: Configure OrangeFox environment
         run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          set -eux
 
-          echo "========================================"
-          echo "BoardConfig.mk"
-          echo "========================================"
+          cd "$GITHUB_WORKSPACE/orangefox"
 
-          cat device/samsung/gta4l/BoardConfig.mk
+          export FOX_BUILD_DEVICE=gta4l
+          export FOX_VANILLA_BUILD=1
+          export OF_FORCE_PREBUILT_KERNEL=1
+          export FOX_AB_DEVICE=0
 
-          echo
-          echo "========================================"
-          echo "BoardConfigCommon.mk"
-          echo "========================================"
+          export TARGET_ARCH=arm64
 
-          cat device/samsung/gta4l-common/BoardConfigCommon.mk
+          # Tell the Android build system which already-built kernel to use.
+          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
 
-      - name: Inspect product definitions
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          # Use ccache to reduce rebuild time if the runner cache is available.
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
+          ccache -M 10G || true
 
-          echo "========================================"
-          echo "AndroidProducts.mk"
-          echo "========================================"
-
-          cat device/samsung/gta4l/AndroidProducts.mk
-
-          echo
-          echo "========================================"
-          echo "lineage_gta4l.mk"
-          echo "========================================"
-
-          cat device/samsung/gta4l/lineage_gta4l.mk
-
-          echo
-          echo "========================================"
-          echo "device.mk"
-          echo "========================================"
-
-          cat device/samsung/gta4l/device.mk
-
-      - name: Inspect fstab candidates
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "FSTAB CONTENT"
-          echo "========================================"
-
-          while IFS= read -r file; do
-            echo
-            echo "----------------------------------------"
-            echo "$file"
-            echo "----------------------------------------"
-            cat "$file"
-          done < <(
-            find device/samsung/gta4l \
-                 device/samsung/gta4l-common \
-              -type f \
-              \( -iname '*fstab*' \) \
-              -print \
-              | sort
-          )
-
-      - name: Inspect recovery references
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "RECOVERY REFERENCES"
-          echo "========================================"
-
-          grep -RniE \
-            'TARGET_RECOVERY|RECOVERY_FSTAB|TW_|OF_|BOARD_RECOVERY|RECOVERYIMAGE|recoveryimage' \
-            device/samsung/gta4l \
-            device/samsung/gta4l-common \
-            2>/dev/null \
-            | head -n 500 || true
-
-      - name: Inspect kernel configuration
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "KERNEL TREE"
-          echo "========================================"
-
-          ls -la kernel/samsung/sm6115
-
-          echo
-          echo "========================================"
-          echo "DEFCONFIG REFERENCES"
-          echo "========================================"
-
-          grep -RniE \
-            'defconfig|gta4l-common.config|TARGET_KERNEL' \
-            device/samsung/gta4l \
-            device/samsung/gta4l-common \
-            2>/dev/null \
-            || true
-
-      - name: Inspect OrangeFox environment
-        run: |
-          cd "$GITHUB_WORKSPACE/fox"
-
-          echo "========================================"
-          echo "ORANGEFOX SOURCE"
-          echo "========================================"
-
-          git -C . status --short || true
-
-          echo
           echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
           echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
+          echo "OF_FORCE_PREBUILT_KERNEL=$OF_FORCE_PREBUILT_KERNEL"
+          echo "FOX_AB_DEVICE=$FOX_AB_DEVICE"
+          echo "TARGET_ARCH=$TARGET_ARCH"
+          echo "TARGET_PREBUILT_KERNEL=$TARGET_PREBUILT_KERNEL"
 
-      - name: Check build environment
+      - name: Lunch OrangeFox
         run: |
-          cd "$GITHUB_WORKSPACE/fox"
+          set -eux
 
-          set +e
+          cd "$GITHUB_WORKSPACE/orangefox"
+
+          export FOX_BUILD_DEVICE=gta4l
+          export FOX_VANILLA_BUILD=1
+          export OF_FORCE_PREBUILT_KERNEL=1
+          export FOX_AB_DEVICE=0
+          export TARGET_ARCH=arm64
+          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
 
           source build/envsetup.sh
 
+          lunch twrp_gta4l-eng
+
+      - name: Build OrangeFox recovery
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/orangefox"
+
+          export FOX_BUILD_DEVICE=gta4l
+          export FOX_VANILLA_BUILD=1
+          export OF_FORCE_PREBUILT_KERNEL=1
+          export FOX_AB_DEVICE=0
+          export TARGET_ARCH=arm64
+          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
+
+          source build/envsetup.sh
+          lunch twrp_gta4l-eng
+
+          echo "Starting OrangeFox build..."
+
+          mka recoveryimage 2>&1 | tee "$GITHUB_WORKSPACE/orangefox-build.log"
+
+      - name: Verify output
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/orangefox"
+
+          OUTPUT="out/target/product/gta4l/OrangeFox-unofficial-gta4l.img"
+
+          if [ ! -f "$OUTPUT" ]; then
+            echo "ERROR: OrangeFox image was not produced."
+            find out/target/product/gta4l -maxdepth 2 -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "OrangeFox build successful!"
+          ls -lh "$OUTPUT"
+
           echo
-          echo "========================================"
-          echo "AVAILABLE GTA4L LUNCH TARGETS"
-          echo "========================================"
+          echo "SHA256:"
+          sha256sum "$OUTPUT"
 
-          lunch 2>&1 | grep -i gta4l || true
-
-          echo
-          echo "========================================"
-          echo "ALL LUNCH TARGETS CONTAINING TWRP/FOX"
-          echo "========================================"
-
-          lunch 2>&1 | grep -Ei 'twrp|orangefox|fox' || true
-
-          echo
-          echo "========================================"
-          echo "ENVIRONMENT STATUS"
-          echo "========================================"
-
-          echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
-          echo "OUT_DIR=$OUT_DIR"
-          echo "FOX_MANIFEST_ROOT=$FOX_MANIFEST_ROOT"
-
-      - name: Upload inspection output
-        if: always()
+      - name: Upload OrangeFox image
         uses: actions/upload-artifact@v4
         with:
-          name: gta4l-android16-orangefox-inspection
+          name: OrangeFox-R12-gta4l
           path: |
-            fox/device/samsung/gta4l/
-            fox/device/samsung/gta4l-common/
-          if-no-files-found: warn
+            orangefox/out/target/product/gta4l/OrangeFox-unofficial-gta4l.img
+            orangefox-build.log
+          if-no-files-found: error
+          retention-days: 14
