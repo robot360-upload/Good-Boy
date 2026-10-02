@@ -236,7 +236,9 @@ jobs:
           export TARGET_ARCH=arm64
           export TARGET_PREBUILT_KERNEL="$PWD/prebuilts/kernel/gta4l/Image.gz-dtb"
 
+          set +e
           source build/envsetup.sh
+          set -e
 
           lunch twrp_gta4l-eng
 
@@ -264,7 +266,9 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=/usr/bin/ccache
 
+          set +e
           source build/envsetup.sh
+          set -e
 
           lunch twrp_gta4l-eng
 
