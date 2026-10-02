@@ -10,17 +10,13 @@ jobs:
     env:
       FOX_BUILD_DEVICE: gta4l
       FOX_VANILLA_BUILD: 1
-      OF_FORCE_PREBUILT_KERNEL: 1
-
-      # GTA4L is A-only, not A/B.
       FOX_AB_DEVICE: 0
-
-      # Use the exact kernel that is already known to boot on the tablet.
-      TARGET_PREBUILT_KERNEL: ${{ github.workspace }}/prebuilts/kernel/gta4l/Image.gz-dtb
+      OF_FORCE_PREBUILT_KERNEL: 1
+      TARGET_ARCH: arm64
+      ALLOW_MISSING_DEPENDENCIES: true
 
     steps:
-
-      - name: Checkout Build-Kernel repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Free disk space
@@ -32,11 +28,12 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/local/share/chromium
+
           sudo apt-get clean
 
           df -h
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           set -eux
 
@@ -80,34 +77,42 @@ jobs:
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o "$HOME/bin/repo"
 
-          chmod a+x "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
 
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-          repo --version
+          "$HOME/bin/repo" --version
 
-      - name: Prepare OrangeFox source tree
+      - name: Sync OrangeFox 12.1 source
         run: |
           set -eux
 
-          mkdir -p "$GITHUB_WORKSPACE/orangefox"
-          cd "$GITHUB_WORKSPACE/orangefox"
+          mkdir -p "$GITHUB_WORKSPACE/OrangeFox_sync"
 
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
 
-          # OrangeFox R12 source branch
           git clone \
-            --depth=1 \
-            --branch fox_12.1 \
-            https://gitlab.com/OrangeFox/sync.git \
-            orangefox-sync
+            https://gitlab.com/OrangeFox/sync.git
 
-          cd orangefox-sync
+          cd sync
 
           chmod +x orangefox_sync.sh
 
-          ./orangefox_sync.sh --branch fox_12.1
+          ./orangefox_sync.sh \
+            --branch 12.1 \
+            --path "$GITHUB_WORKSPACE/orangefox"
+
+      - name: Verify OrangeFox source
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/orangefox"
+
+          test -f build/envsetup.sh
+          test -d bootable/recovery
+          test -d vendor/recovery
+
+          echo "OrangeFox source OK"
 
       - name: Add GTA4L device trees
         run: |
@@ -117,21 +122,19 @@ jobs:
 
           mkdir -p device/samsung
 
-          # Device-specific tree
           git clone \
             --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l.git \
             device/samsung/gta4l
 
-          # Common GTA4L tree
           git clone \
             --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_device_samsung_gta4l-common.git \
             device/samsung/gta4l-common
 
-      - name: Install exact prebuilt kernel
+      - name: Install prebuilt kernel
         run: |
           set -eux
 
@@ -139,11 +142,12 @@ jobs:
 
           mkdir -p prebuilts/kernel/gta4l
 
+          test -f \
+            "$GITHUB_WORKSPACE/prebuilts/kernel/gta4l/Image.gz-dtb"
+
           cp \
             "$GITHUB_WORKSPACE/prebuilts/kernel/gta4l/Image.gz-dtb" \
             prebuilts/kernel/gta4l/Image.gz-dtb
-
-          test -f prebuilts/kernel/gta4l/Image.gz-dtb
 
           echo "Prebuilt kernel:"
           ls -lh prebuilts/kernel/gta4l/Image.gz-dtb
@@ -151,24 +155,49 @@ jobs:
           echo "SHA256:"
           sha256sum prebuilts/kernel/gta4l/Image.gz-dtb
 
-      - name: Verify GTA4L configuration
+      - name: Create OrangeFox product definition
         run: |
           set -eux
 
           cd "$GITHUB_WORKSPACE/orangefox"
 
-          echo "=== Device BoardConfig ==="
-          sed -n '1,220p' device/samsung/gta4l/BoardConfig.mk
+          cat > device/samsung/gta4l/twrp_gta4l.mk <<'EOF'
+          #
+          # OrangeFox recovery product for Samsung Galaxy Tab A7
+          #
+
+          $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+
+          $(call inherit-product, device/samsung/gta4l/device.mk)
+
+          PRODUCT_DEVICE := gta4l
+          PRODUCT_NAME := twrp_gta4l
+          PRODUCT_BRAND := samsung
+          PRODUCT_MODEL := SM-T505
+          PRODUCT_MANUFACTURER := samsung
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("device/samsung/gta4l/AndroidProducts.mk")
+
+          text = p.read_text()
+
+          if "twrp_gta4l.mk" not in text:
+              text += "\nPRODUCT_MAKEFILES += \\\n    $(LOCAL_DIR)/twrp_gta4l.mk\n"
+
+          p.write_text(text)
+          PY
+
+          echo "=== AndroidProducts.mk ==="
+          cat device/samsung/gta4l/AndroidProducts.mk
 
           echo
-          echo "=== Common BoardConfig ==="
-          sed -n '1,280p' device/samsung/gta4l-common/BoardConfigCommon.mk
+          echo "=== twrp_gta4l.mk ==="
+          cat device/samsung/gta4l/twrp_gta4l.mk
 
-          echo
-          echo "=== Prebuilt kernel ==="
-          file prebuilts/kernel/gta4l/Image.gz-dtb
-
-      - name: Configure OrangeFox environment
+      - name: Configure prebuilt kernel
         run: |
           set -eux
 
@@ -176,27 +205,25 @@ jobs:
 
           export FOX_BUILD_DEVICE=gta4l
           export FOX_VANILLA_BUILD=1
-          export OF_FORCE_PREBUILT_KERNEL=1
           export FOX_AB_DEVICE=0
-
+          export OF_FORCE_PREBUILT_KERNEL=1
           export TARGET_ARCH=arm64
 
-          # Tell the Android build system which already-built kernel to use.
-          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
+          export TARGET_PREBUILT_KERNEL="$PWD/prebuilts/kernel/gta4l/Image.gz-dtb"
 
-          # Use ccache to reduce rebuild time if the runner cache is available.
           export USE_CCACHE=1
           export CCACHE_EXEC=/usr/bin/ccache
+
           ccache -M 10G || true
 
           echo "FOX_BUILD_DEVICE=$FOX_BUILD_DEVICE"
           echo "FOX_VANILLA_BUILD=$FOX_VANILLA_BUILD"
-          echo "OF_FORCE_PREBUILT_KERNEL=$OF_FORCE_PREBUILT_KERNEL"
           echo "FOX_AB_DEVICE=$FOX_AB_DEVICE"
+          echo "OF_FORCE_PREBUILT_KERNEL=$OF_FORCE_PREBUILT_KERNEL"
           echo "TARGET_ARCH=$TARGET_ARCH"
           echo "TARGET_PREBUILT_KERNEL=$TARGET_PREBUILT_KERNEL"
 
-      - name: Lunch OrangeFox
+      - name: Validate build target BEFORE compilation
         run: |
           set -eux
 
@@ -204,16 +231,27 @@ jobs:
 
           export FOX_BUILD_DEVICE=gta4l
           export FOX_VANILLA_BUILD=1
-          export OF_FORCE_PREBUILT_KERNEL=1
           export FOX_AB_DEVICE=0
+          export OF_FORCE_PREBUILT_KERNEL=1
           export TARGET_ARCH=arm64
-          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
+          export TARGET_PREBUILT_KERNEL="$PWD/prebuilts/kernel/gta4l/Image.gz-dtb"
 
           source build/envsetup.sh
 
           lunch twrp_gta4l-eng
 
-      - name: Build OrangeFox recovery
+          echo
+          echo "======================================"
+          echo "OrangeFox target successfully selected"
+          echo "======================================"
+
+          get_build_var TARGET_PRODUCT
+          get_build_var PRODUCT_DEVICE
+          get_build_var TARGET_ARCH
+          get_build_var TARGET_PREBUILT_KERNEL
+          get_build_var TARGET_KERNEL_SOURCE
+
+      - name: Build OrangeFox
         run: |
           set -eux
 
@@ -221,40 +259,49 @@ jobs:
 
           export FOX_BUILD_DEVICE=gta4l
           export FOX_VANILLA_BUILD=1
-          export OF_FORCE_PREBUILT_KERNEL=1
           export FOX_AB_DEVICE=0
+          export OF_FORCE_PREBUILT_KERNEL=1
           export TARGET_ARCH=arm64
-          export TARGET_PREBUILT_KERNEL="$GITHUB_WORKSPACE/orangefox/prebuilts/kernel/gta4l/Image.gz-dtb"
+          export TARGET_PREBUILT_KERNEL="$PWD/prebuilts/kernel/gta4l/Image.gz-dtb"
+
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
 
           source build/envsetup.sh
-          lunch twrp_gta4l-eng
 
-          echo "Starting OrangeFox build..."
+          lunch twrp_gta4l-eng
 
           mka recoveryimage 2>&1 | tee "$GITHUB_WORKSPACE/orangefox-build.log"
 
-      - name: Verify output
+      - name: Verify OrangeFox image
         run: |
           set -eux
 
-          cd "$GITHUB_WORKSPACE/orangefox"
-
-          OUTPUT="out/target/product/gta4l/OrangeFox-unofficial-gta4l.img"
+          OUTPUT="$GITHUB_WORKSPACE/orangefox/out/target/product/gta4l/OrangeFox-unofficial-gta4l.img"
 
           if [ ! -f "$OUTPUT" ]; then
-            echo "ERROR: OrangeFox image was not produced."
-            find out/target/product/gta4l -maxdepth 2 -type f 2>/dev/null || true
+            echo "OrangeFox image was not generated."
+
+            find \
+              "$GITHUB_WORKSPACE/orangefox/out/target/product/gta4l" \
+              -maxdepth 2 \
+              -type f \
+              2>/dev/null || true
+
             exit 1
           fi
 
-          echo "OrangeFox build successful!"
+          echo "======================================"
+          echo "OrangeFox build successful"
+          echo "======================================"
+
           ls -lh "$OUTPUT"
 
           echo
           echo "SHA256:"
           sha256sum "$OUTPUT"
 
-      - name: Upload OrangeFox image
+      - name: Upload OrangeFox recovery
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox-R12-gta4l
