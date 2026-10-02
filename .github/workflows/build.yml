@@ -225,7 +225,7 @@ jobs:
 
       - name: Validate build target BEFORE compilation
         run: |
-          set -ex
+          set -x
 
           cd "$GITHUB_WORKSPACE/orangefox"
 
@@ -250,7 +250,7 @@ jobs:
 
       - name: Build OrangeFox
         run: |
-          set -ex
+          set -x
 
           cd "$GITHUB_WORKSPACE/orangefox"
 
