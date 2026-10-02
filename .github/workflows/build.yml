@@ -225,7 +225,7 @@ jobs:
 
       - name: Validate build target BEFORE compilation
         run: |
-          set -eux
+          set -ex
 
           cd "$GITHUB_WORKSPACE/orangefox"
 
@@ -240,10 +240,7 @@ jobs:
 
           lunch twrp_gta4l-eng
 
-          echo
-          echo "======================================"
           echo "OrangeFox target successfully selected"
-          echo "======================================"
 
           get_build_var TARGET_PRODUCT
           get_build_var PRODUCT_DEVICE
@@ -253,7 +250,7 @@ jobs:
 
       - name: Build OrangeFox
         run: |
-          set -eux
+          set -ex
 
           cd "$GITHUB_WORKSPACE/orangefox"
 
